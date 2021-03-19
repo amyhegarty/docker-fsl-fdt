@@ -81,7 +81,7 @@ def parse_arguments(argv):
       elif opt in ("-i", "--in"):
          inputs = arg
          if not s.path.exists(inputs):
-           raise CustomError("BIDS directory does not exist")
+           raise Exception("BIDS directory does not exist")
       elif opt in ("-o", "--out"):
          outputs = arg
       elif opt in ("--participant-label"):
@@ -97,7 +97,7 @@ def parse_arguments(argv):
          elif cat in ("FALSE", "False", "false"):
             cat = False
          else:
-            raise CustomError("Error: --concat-preproc= [TRUE / FALSE]")
+            raise Exception("Error: --concat-preproc= [TRUE / FALSE]")
       elif opt in ("--run-qc"):
          qc = arg
          if qc in ("TRUE", "True", "true"):
@@ -105,20 +105,20 @@ def parse_arguments(argv):
          elif qc in ("FALSE", "False", "false"):
             qc = False
          else:
-            raise CustomError("Error: --run-qc= [TRUE / FALSE]")
+            raise Exception("Error: --run-qc= [TRUE / FALSE]")
       elif opt in ("--studyname"):
         studyname = arg
     if 'inputs' not in locals():
       print_help()
-      raise CustomError("Missing required argument --in=")
+      raise Exception("Missing required argument --in=")
       sys.exit()
     if 'outputs' not in locals():
       print_help()
-      raise CustomError("Missing required argument --out=")
+      raise Exception("Missing required argument --out=")
       sys.exit()
     if 'pid' not in locals():
       print_help()
-      raise CustomError("Missing required argument --participant-label=")
+      raise Exception("Missing required argument --participant-label=")
       sys.exit()
       
     print('Input Bids directory:\t', inputs)
