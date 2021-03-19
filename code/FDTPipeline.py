@@ -780,9 +780,37 @@ def run_dtifit_opt1(layout,entry,dependencies):
 
     return jid
 
-def eddy_QC():
-    # add section to run automated qc script...
-    print('TO DO')
+def run_cleanup(entry,jid):
+    
+    if entry.cleandir == True:
+      # write bash script for execution
+      original_stdout = sys.stdout # Save a reference to the original standard output
+      sys.stdout.flush()
+
+      with open(entry.wd + '/cmd_cleanup.sh', 'w') as fid:
+        sys.stdout = fid # Change the standard output to the file we created.
+
+        print(header.replace('placehold','dti-clean'))
+        print('#SBATCH --job-name=dti-clean')
+        if dependencies:
+          s=','
+          print('#SBATCH --dependency=' + s.join(dependencies))
+        print('#SBATCH --wait')
+        
+        # add commands here...
+        print('rm -Rf ' + entry.wd)
+
+        sys.stdout = original_stdout # Reset the standard output to its original value
+
+      # change permissions to make sure file is executable 
+      os.chmod(entry.wd + '/cmd_cleanup.sh', 0o774)
+
+      # run script
+      cmd = 'sbatch ' + entry.wd + '/cmd_cleanup.sh'
+      process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, universal_newlines=True)
+      out, err = process.communicate() 
+      print(out)       
+      jid.append(out.split()[-1])  
 
 
 
@@ -804,7 +832,7 @@ def main(argv):
     bids = bids_data(entry)
     jid=[]
 
-    # step 1: run topup
+    # pipeline: (1) topup, (2) eddy, (3) dtifit
     if not os.path.exists(entry.wd + '/topup/topup_b0_iout.nii.gz'):
         jid=run_topup(bids,entry)
         print(jid)
@@ -826,7 +854,8 @@ def main(argv):
 
       jid=run_dtifit_opt2(bids,entry,jid)
 
-
+    # clean-up
+    run_cleanup(entry,jid)
     
 
 if __name__ == "__main__":
