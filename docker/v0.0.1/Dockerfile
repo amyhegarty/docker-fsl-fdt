@@ -88,7 +88,6 @@ RUN apt-get update -qq \
 
 
 #############################################
-
 # Install Miniconda
 
 
@@ -105,28 +104,34 @@ RUN export PATH="/opt/miniconda-latest/bin:$PATH" \
     && conda config --system --set auto_update_conda false \
     && conda config --system --set show_channel_urls true \
     && sync && conda clean -y --all && sync \
-    && conda create -y -q --name neuro \
-    && conda install -y -q --name neuro \
+#    && conda create -y -q --name base \
+#    && conda install -y -q --name base \
+#           "traits" \
+#           "nipype" \
+#           "glob2" \
+    && conda install \
            "traits" \
            "nipype" \
            "glob2" \
     && sync && conda clean -y --all && sync \
-    && bash -c "source activate neuro \
-    &&   pip install --no-cache-dir  \
+#    && bash -c "source activate base \
+#    &&   pip install --no-cache-dir  \
+#             "pybids" \
+#             "jsons"" \
+    && pip install --no-cache-dir \
              "pybids" \
-             "jsons"" \
+             "jsons" \
     && rm -rf ~/.cache/pip/* \
     && sync 
 
 #############################################
-
 # Install FDT-Pipeline code from GitHub
 
 RUN rm -vfR /var/lib/apt/lists/* \
     && apt-get update \
     && apt-get install -y -q --no-install-recommends git \
-    && mkdir -p /code \
-    && cd /code \
+    && mkdir -p /ent \
+    && cd /ent \
     && git clone https://github.com/amyhegarty/docker-fsl-fdt.git
 
 
@@ -161,3 +166,11 @@ RUN echo '{ \
     \n    ] \
     \n  ] \
     \n}' > /neurodocker/neurodocker_specs.json
+
+
+#############################################
+# Run pipeline script at entry
+
+RUN chmod +x /ent/docker-fsl-fdt/code/FDTPipeline.py
+
+ENTRYPOINT ["/ent/docker-fsl-fdt/code/FDTPipeline.py"]
