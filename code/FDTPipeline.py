@@ -60,10 +60,10 @@ def parse_arguments(argv):
     print("\nParsing User Inputs...")
     que = "ics"
     studyname = ""
-    wd = "/projects/amhe4269/working"
+    wd = "/working"
     pid = "115219"
-    inputs = '/pl/active/banich/studies/ldrc/BIDS'
-    outputs = '/projects/amhe4269/working'
+#    inputs = '/pl/active/banich/studies/ldrc/BIDS'
+#    outputs = '/projects/amhe4269/working'
     cat = False
     qc = True
     cleandir = True
@@ -108,7 +108,14 @@ def parse_arguments(argv):
             raise CustomError("Error: --run-qc= [TRUE / FALSE]")
       elif opt in ("--studyname"):
         studyname = arg
-
+    if 'inputs' not in locals():
+      print_help()
+      raise CustomError("Missing required argument --in=")
+      sys.exit()
+    if 'outputs' not in locals():
+      print_help()
+      raise CustomError("Missing required argument --out=")
+      sys.exit()
     print('Input Bids directory:\t', inputs)
     print('Derivatives path:\t', outputs)
     print('Participant:\t', str(pid))
