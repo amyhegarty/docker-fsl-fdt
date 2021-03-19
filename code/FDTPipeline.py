@@ -61,7 +61,7 @@ def parse_arguments(argv):
     que = "ics"
     studyname = ""
     wd = "/working"
-    pid = "115219"
+#    pid = "115219"
 #    inputs = '/pl/active/banich/studies/ldrc/BIDS'
 #    outputs = '/projects/amhe4269/working'
     cat = False
@@ -116,6 +116,11 @@ def parse_arguments(argv):
       print_help()
       raise CustomError("Missing required argument --out=")
       sys.exit()
+    if 'pid' not in locals():
+      print_help()
+      raise CustomError("Missing required argument --participant-label=")
+      sys.exit()
+      
     print('Input Bids directory:\t', inputs)
     print('Derivatives path:\t', outputs)
     print('Participant:\t', str(pid))
