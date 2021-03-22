@@ -80,7 +80,7 @@ def parse_arguments(argv):
          sys.exit()
       elif opt in ("-i", "--in"):
          inputs = arg
-         if not s.path.exists(inputs):
+         if not os.path.exists(inputs):
            raise Exception("BIDS directory does not exist")
       elif opt in ("-o", "--out"):
          outputs = arg
