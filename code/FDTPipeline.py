@@ -40,8 +40,8 @@ def print_help():
                                         should be concatenated before pre-processing
           --run-qc=                   (Default: TRUE) boolean to run automated quality 
                                         control for eddy corrected images
-          --studyname=                (Default: none) only used to set "account" flag for
-                                        SLURM jobs
+    ** fsl_sub used for job scheduleing. Set all necessary queue variables in system 
+       environment before command execution 
         
         """)
 
@@ -61,9 +61,6 @@ def parse_arguments(argv):
     que = "ics"
     studyname = ""
     wd = "/working"
-#    pid = "115219"
-#    inputs = '/pl/active/banich/studies/ldrc/BIDS'
-#    outputs = '/projects/amhe4269/working'
     cat = False
     qc = True
     cleandir = True
@@ -123,8 +120,7 @@ def parse_arguments(argv):
       
     print('Input Bids directory:\t', inputs)
     print('Derivatives path:\t', outputs)
-    print('Participant:\t', str(pid))
-    print('Submitting Jobs on blanca-ics-', studyname)
+    print('Participant:\t\t', str(pid))
 
     class args:
       def __init__(self, que, studyname, wd, inputs, outputs, pid, cat,qc):
@@ -140,36 +136,6 @@ def parse_arguments(argv):
     entry = args(que, studyname, wd, inputs, outputs, pid, cat, qc)
 
     return entry
-
-# ------------------------------------------------------------------------------
-#  Set up header information for SLURM (TO DO: make flexible for local run...)
-# ------------------------------------------------------------------------------
-def sbatch_header(entry):
-    if entry.studyname: 
-        accountstr = '#SBATCH --account=blanca-ics-' + entry.studyname
-    else:
-        accountstr = ''
-    if entry.que == "ics":
-        header = '#!/usr/bin/bash' + \
-          '\n' + '#SBATCH --qos=blanca-ics' + \
-          '\n' + '#SBATCH --partition=blanca-ics' + \
-          '\n' + accountstr + \
-          '\n' + '#SBATCH --nodes=1' + \
-          '\n' + '#SBATCH --time=04:00:00' + \
-          '\n' + '#SBATCH --output=' + entry.wd + '/logs' + '/placehold.o%j' + \
-          '\n' + '#SBATCH --error='  + entry.wd + '/logs' + '/placehold.e%j' #+ \
-          #'\n' + '#SBATCH --wait'
-    else:
-        header = '#!/usr/bin/bash' + \
-          '\n' + '#SBATCH --qos=preemtable' + \
-          '\n' + '#SBATCH --partition=blanca-ics' + \
-          '\n' + accountstr + \
-          '\n' + '#SBATCH --nodes=1' + \
-          '\n' + '#SBATCH --time=04:00:00' + \
-          '\n' + '#SBATCH --output=' + entry.wd + '/logs' + '/placehold.o%j' + \
-          '\n' + '#SBATCH --error='  + entry.wd + '/logs' + '/placehold.e%j' #+ \
-          #'\n' + '#SBATCH --wait'
-    return header
 
 # ------------------------------------------------------------------------------
 #  Parse Bids inputs for this script
@@ -207,36 +173,6 @@ def bids_data(entry):
 
     return layout
 
-# def get_readout_time(layout,entry):
-#     import os
-#     import sys
-#     import subprocess
-
-#     dwi = layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi')[0]
-
-#     # write bash script for execution
-#     original_stdout = sys.stdout # Save a reference to the original standard output
-#     sys.stdout.flush()
-
-#     with open(entry.wd + '/cmd_readout.sh', 'w') as fid:
-#       sys.stdout = fid # Change the standard output to the file we created.
-#       print('slices=$(fslval ' + dwi.path + ' dim2);')
-#       print('slices_adj=$(($slices - 1));')
-#       print('ro_time=$(echo "${echospacing} * ${slices_adj}" | bc -l);')
-#       print('ro_time=$(echo "scale=6; ${ro_time} / 1000" | bc -l);')
-#       print('echo "Total readout time is ${ro_time} secs"')
-
-#     sys.stdout = original_stdout # Reset the standard output to its original value
-
-#     # change permissions to make sure file is executable 
-#     os.chmod(entry.wd + '/cmd_readout.sh', 0o774)
-
-#     # run script
-#     cmd = "bash " + entry.wd + "/cmd_readout.sh"
-#     process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, universal_newlines=True)
-#     out, err = process.communicate() 
-#     print(out)       
-
 # ------------------------------------------------------------------------------
 #  Main Pipeline Starts Here...
 # ------------------------------------------------------------------------------
@@ -244,9 +180,8 @@ def run_topup(layout,entry):
     import os
     import sys
     import subprocess
-
-    header = sbatch_header(entry)
-
+    from fsl.utils import fslsub
+    
     # check if blip-up blip-down aquisition (ie dwi collected in opposing phase encoding directions)
     for dwi in layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'):
         ent = dwi.get_entities()
@@ -265,8 +200,6 @@ def run_topup(layout,entry):
     if 'img1' in locals():
         cmd += 'fslroi ' + img1 + ' b0_AP 0 1; '  # takes the first volume of dwi image as b0
         cmd += 'echo "0 -1 0 ' + str(meta['TotalReadoutTime']) + '" >> ' + entry.wd + '/acqparams.txt ; ' # acqparameters for A -> P
-
-        # TODO : pull echo time from metadata for acqparams
         
         refimg = 'b0_AP'
         print('AP acquisition Using: ' + img1)
@@ -274,8 +207,6 @@ def run_topup(layout,entry):
     if 'img2' in locals():
         cmd += 'fslroi ' + img2 + ' b0_PA 0 1; '  # takes the first volume of dwi image as b0  
         cmd += 'echo "0 1 0 ' + str(meta['TotalReadoutTime']) + '" >> ' + entry.wd + '/acqparams.txt ; ' # acqparameters for P -> A
-
-        # TODO : pull echo time from metadata for acqparams
 
         refimg = 'b0_AP'
         print('PA acquisition Using: ' + img2)
@@ -292,9 +223,8 @@ def run_topup(layout,entry):
 
     with open(entry.wd + '/cmd_topup.sh', 'w') as fid:
       sys.stdout = fid # Change the standard output to the file we created.
-
-      print(header.replace('placehold','topup'))
-      print('#SBATCH --job-name=topup')
+      
+      print('#!/usr/bin/bash')
       print('mkdir -p ' + entry.wd + '/topup')
       print('cd ' + entry.wd + '/topup')
       print(cmd)
@@ -313,11 +243,8 @@ def run_topup(layout,entry):
     os.chmod(entry.wd + '/cmd_topup.sh', 0o774)
 
     # run script
-    cmd = "sbatch " + entry.wd + "/cmd_topup.sh"
-    process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, universal_newlines=True)
-    out, err = process.communicate() 
-    print(out)       
-    jid.append(out.split()[-1])
+    cmd = "bash " + entry.wd + "/cmd_topup.sh"
+    jid=fslsub.submit(cmd, job_name='topup', logdir=entry.wd+'/logs', queue='short.q')
 
     return jid
 
@@ -326,8 +253,8 @@ def run_eddy_opt1(layout,entry,dependencies):
     import os
     import sys
     import subprocess
+    from fsl.utils import fslsub
 
-    header = sbatch_header(entry)
     itr=0;
     nfiles = len(layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'))
     jid=[]
@@ -370,16 +297,10 @@ def run_eddy_opt1(layout,entry,dependencies):
         with open(entry.wd + '/cmd_eddy_dwi_' + str(itr) + '.sh', 'w') as fid:
           sys.stdout = fid # Change the standard output to the file we created.
 
-          print(header.replace('placehold','eddy' + str(itr)))
-          print('#SBATCH --job-name=eddy' + str(itr))
-          if dependencies:
-            s=','
-            print('#SBATCH --dependency=' + s.join(dependencies))
-          if itr == nfiles-1:
-            print('#SBATCH --wait') # stall further execution of the pipeline until complete
-
+          print('#!/usr/bin/bash')
           print('mkdir -p ' + entry.wd + '/eddy_dwi_' + str(itr))
           print('cd ' + entry.wd + '/eddy_dwi_' + str(itr))
+          
           # add commands here...
           print('bvalfile=' + bval)
           print('n="$(grep -n "0" $bvalfile | cut -f1 -d":" )"')
@@ -458,11 +379,13 @@ def run_eddy_opt1(layout,entry,dependencies):
         os.chmod(entry.wd + '/cmd_eddy_dwi_' + str(itr) + '.sh', 0o774)
 
         # run script
-        cmd = 'sbatch ' + entry.wd + '/cmd_eddy_dwi_' + str(itr) + '.sh'
-        process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, universal_newlines=True)
-        out, err = process.communicate() 
-        print(out)       
-        jid.append(out.split()[-1])
+        cmd = 'bash ' + entry.wd + '/cmd_eddy_dwi_' + str(itr) + '.sh'
+        if dependencies:
+          jid.append(fslsub.submit(cmd, job_name='eddy'+str(itr), wait_for=s.join(dependencies), logdir=entry.wd+'/logs', queue='long.q'))
+        else:
+          jid.append(fslsub.submit(cmd, job_name='eddy'+str(itr), logdir=entry.wd+'/logs', queue='long.q'))
+        if itr == nfiles-1:
+          fslsub.hold(jid[-1])  # wait until job is complete to proceed
 
         itr = itr+1
 
@@ -476,9 +399,9 @@ def run_eddy_opt2(layout,entry,dependencies):
     import os
     import sys
     import subprocess
+    from fsl.utils import fslsub
 
-    header = sbatch_header(entry)
-    itr=0;
+    itr=0; s=', ';
     nfiles = len(layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'))
 
     # output filename...
@@ -566,10 +489,7 @@ def run_eddy_opt2(layout,entry,dependencies):
     with open(entry.wd + '/cmd_eddy_concat.sh', 'w') as fid:
       sys.stdout = fid # Change the standard output to the file we created.
 
-      print(header.replace('placehold','eddy-concat'))
-      print(header.replace('--time=04:00:00','--time=18:00:00'))
-      print('#SBATCH --job-name=eddy-concat')
-      print('#SBATCH --wait')
+      print('#!/usr/bin/bash')
       print(cmd)
 
       topup_img = '../topup/topup_b0'
@@ -617,24 +537,26 @@ def run_eddy_opt2(layout,entry,dependencies):
     os.chmod(entry.wd + '/cmd_eddy_concat.sh', 0o774)
 
     # run script
-    cmd = "sbatch " + entry.wd + "/cmd_eddy_concat.sh"
-    process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, universal_newlines=True)
-    out, err = process.communicate() 
-    print(out)       
-    jid.append(out.split()[-1])
+    cmd = "bash " + entry.wd + "/cmd_eddy_concat.sh"
+    print(cmd)
+    if dependencies:
+      jid.append(fslsub.submit(cmd, job_name='eddy', wait_for=s.join(dependencies), logdir=entry.wd+'/logs', queue='long.q'))
+    else:
+      jid.append(fslsub.submit(cmd, job_name='eddy', logdir=entry.wd+'/logs', queue='long.q'))
+
+    fslsub.hold(jid[-1])  # wait until job is complete to proceed    
 
     return jid
-
 
 # (Option 2) run tensor fitting on concatenated preprocessed image run with Opt 2
 def run_dtifit_opt2(layout,entry,dependencies):
     import os
     import sys
     import subprocess
+    from fsl.utils import fslsub
 
     # using the distortion corrected dti images, we will compute tensor values
-    header = sbatch_header(entry)
-    itr=0;
+    itr=0; s=', ';
     nfiles = len(layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'))
     jid=[]
 
@@ -656,13 +578,7 @@ def run_dtifit_opt2(layout,entry,dependencies):
         with open(entry.wd + '/cmd_tensor_dwi_' + str(itr) + '.sh', 'w') as fid:
           sys.stdout = fid # Change the standard output to the file we created.
 
-          print(header.replace('placehold','dtifit' + str(itr)))
-          print('#SBATCH --job-name=dtifit' + str(itr))
-          if dependencies:
-            s=','
-            print('#SBATCH --dependency=' + s.join(dependencies))
-          print('#SBATCH --wait')
-
+          print('#!/usr/bin/bash')
           print('mkdir -p ' + entry.wd + '/tensor_dwi_' + str(itr))
           print('cd ' + entry.wd + '/tensor_dwi_' + str(itr))
           # add commands here...
@@ -682,11 +598,13 @@ def run_dtifit_opt2(layout,entry,dependencies):
         os.chmod(entry.wd + '/cmd_tensor_dwi_' + str(itr) + '.sh', 0o774)
 
         # run script
-        cmd = 'sbatch ' + entry.wd + '/cmd_tensor_dwi_' + str(itr) + '.sh'
-        process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, universal_newlines=True)
-        out, err = process.communicate() 
-        print(out)       
-        jid.append(out.split()[-1])
+        cmd = 'bash ' + entry.wd + '/cmd_tensor_dwi_' + str(itr) + '.sh'
+        if dependencies:
+          jid.append(fslsub.submit(cmd, job_name='dtifit'+str(itr), wait_for=s.join(dependencies), logdir=entry.wd+'/logs', queue='veryshort.q'))
+        else:
+          jid.append(fslsub.submit(cmd, job_name='dtifit'+str(itr), logdir=entry.wd+'/logs', queue='veryshort.q'))
+        if itr == nfiles-1:
+          fslsub.hold(jid[-1])  # wait until job is complete to proceed    
 
         itr = itr+1
 
@@ -697,10 +615,10 @@ def run_dtifit_opt1(layout,entry,dependencies):
     import os
     import sys
     import subprocess
+    from fsl.utils import fslsub
 
     # using the distortion corrected dti images, we will compute tensor values
-    header = sbatch_header(entry)
-    itr=0;
+    itr=0; s=', '
     nfiles = len(layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'))
     jid=[]
 
@@ -716,7 +634,6 @@ def run_dtifit_opt1(layout,entry,dependencies):
     ent['desc'] = 'preproc'
 
     outfile = layout.build_path(ent, pattern, validate=False, absolute_paths=False)
-
 
     if not os.path.exists(entry.wd + '/tensor_dwi_join' + '/dwi_FA.nii.gz'):
 
@@ -758,12 +675,7 @@ def run_dtifit_opt1(layout,entry,dependencies):
       with open(entry.wd + '/cmd_tensor_dwi_join.sh', 'w') as fid:
         sys.stdout = fid # Change the standard output to the file we created.
 
-        print(header.replace('placehold','dtifit'))
-        print('#SBATCH --job-name=dtifit')
-        if dependencies:
-          s=','
-          print('#SBATCH --dependency=' + s.join(dependencies))
-        print('#SBATCH --wait')
+        print('#!/usr/bin/bash')
         
         # add commands here...
         print(cmd)
@@ -784,11 +696,13 @@ def run_dtifit_opt1(layout,entry,dependencies):
       os.chmod(entry.wd + '/cmd_tensor_dwi_join.sh', 0o774)
 
       # run script
-      cmd = 'sbatch ' + entry.wd + '/cmd_tensor_dwi_join.sh'
-      process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, universal_newlines=True)
-      out, err = process.communicate() 
-      print(out)       
-      jid.append(out.split()[-1])  
+      cmd = 'bash ' + entry.wd + '/cmd_tensor_dwi_join.sh'
+      if dependencies:
+        jid.append(fslsub.submit(cmd, job_name='dtifit', wait_for=s.join(dependencies), logdir=entry.wd+'/logs', queue='veryshort.q'))
+      else:
+        jid.append(fslsub.submit(cmd, job_name='dtifit', logdir=entry.wd+'/logs', queue='veryshort.q'))
+      
+      fslsub.hold(jid[-1])  # wait until job is complete to proceed   
 
     return jid
 
@@ -802,13 +716,8 @@ def run_cleanup(entry,jid):
       with open(entry.wd + '/cmd_cleanup.sh', 'w') as fid:
         sys.stdout = fid # Change the standard output to the file we created.
 
-        print(header.replace('placehold','dti-clean'))
-        print('#SBATCH --job-name=dti-clean')
-        if dependencies:
-          s=','
-          print('#SBATCH --dependency=' + s.join(dependencies))
-        print('#SBATCH --wait')
-        
+        print('#!/usr/bin/bash')
+
         # add commands here...
         print('rm -Rf ' + entry.wd)
 
@@ -818,11 +727,14 @@ def run_cleanup(entry,jid):
       os.chmod(entry.wd + '/cmd_cleanup.sh', 0o774)
 
       # run script
-      cmd = 'sbatch ' + entry.wd + '/cmd_cleanup.sh'
-      process = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, universal_newlines=True)
-      out, err = process.communicate() 
-      print(out)       
-      jid.append(out.split()[-1])  
+      cmd = 'bash ' + entry.wd + '/cmd_cleanup.sh'
+      if dependencies:
+        jid.append(fslsub.submit(cmd, job_name='dti-clean', wait_for=s.join(dependencies), logdir=entry.wd+'/logs', queue='veryshort.q'))
+      else:
+        jid.append(fslsub.submit(cmd, job_name='dti-clean', logdir=entry.wd+'/logs', queue='veryshort.q'))
+      
+      fslsub.hold(jid[-1])  # wait until job is complete to proceed   
+
 
 
 
