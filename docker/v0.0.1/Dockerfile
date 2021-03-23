@@ -121,6 +121,7 @@ RUN export PATH="/opt/miniconda-latest/bin:$PATH" \
     && pip install --no-cache-dir \
              "pybids" \
              "jsons" \
+             "fslpy" \
     && rm -rf ~/.cache/pip/* \
     && sync 
 
@@ -134,6 +135,9 @@ RUN rm -vfR /var/lib/apt/lists/* \
     && cd /ent \
     && git clone https://github.com/amyhegarty/docker-fsl-fdt.git
 
+# replace fsl_sub from basic install with custom command
+RUN mv /ent/docker-fsl-fdt/code/fslutils/fsl6.0.3/fsl_sub /opt/fsl-6.0.3/bin/fsl_sub \
+    && chmod a+rwx /opt/fsl-6.0.3/bin/fsl_sub
 
 RUN echo '{ \
     \n  "pkg_manager": "apt", \
@@ -147,7 +151,6 @@ RUN echo '{ \
     \n      { \
     \n        "create_env": "neuro", \
     \n        "conda_install": [ \
-    \n          "python3", \
     \n          "traits", \
     \n          "nipype", \
     \n          "json", \
@@ -155,6 +158,7 @@ RUN echo '{ \
     \n        ], \
     \n        "pip_install": [ \
     \n          "pybids" \
+    \n          "fslpy" \
     \n        ] \
     \n      } \
     \n    ], \
@@ -173,4 +177,4 @@ RUN echo '{ \
 
 RUN chmod +x /ent/docker-fsl-fdt/code/FDTPipeline.py
 
-ENTRYPOINT ["/ent/docker-fsl-fdt/code/FDTPipeline.py"]
+ENTRYPOINT ["python","/ent/docker-fsl-fdt/code/FDTPipeline.py"]
