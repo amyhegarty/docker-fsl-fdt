@@ -181,7 +181,7 @@ def worker(name,cmdfile):
     """Executes the bash script"""
     import subprocess
     from subprocess import PIPE
-    process = subprocess.Popen(cmdfile.split(), stdout=PIPE, stderr=PIPE)
+    process = subprocess.Popen(cmdfile.split(), stdout=PIPE, stderr=PIPE, universal_newlines=True)
     output, error = process.communicate()
     print(error)
     print('Worker: ' + name + ' finished')
