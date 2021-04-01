@@ -123,7 +123,7 @@ RUN export PATH="/opt/miniconda-latest/bin:$PATH" \
              "jsons" \
              "fslpy" \
              "multiprocess" \
-             "subprocess" \
+             "subprocess.run" \
     && rm -rf ~/.cache/pip/* \
     && sync 
 
@@ -162,7 +162,7 @@ RUN echo '{ \
     \n          "pybids" \
     \n          "fslpy" \
     \n          "multiprocess" \
-    \n          "subprocess" \
+    \n          "subprocess.run" \
     \n        ] \
     \n      } \
     \n    ], \
@@ -174,6 +174,10 @@ RUN echo '{ \
     \n    ] \
     \n  ] \
     \n}' > /neurodocker/neurodocker_specs.json
+
+#############################################
+# Patch issue with tr command
+RUN ln -s /usr/bin/tr /bin/tr 
 
 
 #############################################
