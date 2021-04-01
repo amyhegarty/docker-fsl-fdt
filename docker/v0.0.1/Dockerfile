@@ -122,6 +122,8 @@ RUN export PATH="/opt/miniconda-latest/bin:$PATH" \
              "pybids" \
              "jsons" \
              "fslpy" \
+             "multiprocess" \
+             "subprocess" \
     && rm -rf ~/.cache/pip/* \
     && sync 
 
@@ -159,6 +161,8 @@ RUN echo '{ \
     \n        "pip_install": [ \
     \n          "pybids" \
     \n          "fslpy" \
+    \n          "multiprocess" \
+    \n          "subprocess" \
     \n        ] \
     \n      } \
     \n    ], \
