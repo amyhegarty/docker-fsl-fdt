@@ -27,7 +27,6 @@
 
 def print_help():
   print("""
-
     Diffusion Preprocessing Pipeline
         Usage: """ + """ --in=<bids-inputs> --out=<outputs> [OPTIONS]
         OPTIONS
@@ -63,7 +62,7 @@ def parse_arguments(argv):
     wd = "/working"
     cat = False
     qc = True
-    cleandir = True
+    cleandir = False
 
 
     try:
@@ -123,7 +122,7 @@ def parse_arguments(argv):
     print('Participant:\t\t', str(pid))
 
     class args:
-      def __init__(self, que, studyname, wd, inputs, outputs, pid, cat,qc):
+      def __init__(self, que, studyname, wd, inputs, outputs, pid, cat, qc, cleandir):
         self.que = que
         self.studyname = studyname
         self.wd = wd
@@ -132,8 +131,9 @@ def parse_arguments(argv):
         self.pid = pid
         self.concat= cat
         self.eddy_QC=qc
+        self.cleandir=cleandir
 
-    entry = args(que, studyname, wd, inputs, outputs, pid, cat, qc)
+    entry = args(que, studyname, wd, inputs, outputs, pid, cat, qc, cleandir)
 
     return entry
 
@@ -176,11 +176,22 @@ def bids_data(entry):
 # ------------------------------------------------------------------------------
 #  Main Pipeline Starts Here...
 # ------------------------------------------------------------------------------
+
+def worker(name,cmdfile):
+    """Executes the bash script"""
+    import subprocess
+    from subprocess import PIPE
+    process = subprocess.Popen(cmdfile.split(), stdout=PIPE, stderr=PIPE)
+    output, error = process.communicate()
+    print(error)
+    print('Worker: ' + name + ' finished')
+    return
+
 def run_topup(layout,entry):
     import os
     import sys
     import subprocess
-    from fsl.utils import fslsub
+    import multiprocessing
     
     # check if blip-up blip-down aquisition (ie dwi collected in opposing phase encoding directions)
     for dwi in layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'):
@@ -244,23 +255,29 @@ def run_topup(layout,entry):
 
     # run script
     cmd = "bash " + entry.wd + "/cmd_topup.sh"
-    jid=fslsub.submit(cmd, job_name='topup', logdir=entry.wd+'/logs', queue='short.q')
+    name = "topup"
+    p = multiprocessing.Process(target=worker, args=(name,cmd))
+    p.start()
+    print(p)
 
-    return jid
+    p.join()  # blocks further execution until job is finished
+
+    ## end run_topup
 
 # (Option 1) run eddy on each input scan seperately (no multi-scan concatination)
-def run_eddy_opt1(layout,entry,dependencies):
+def run_eddy_opt1(layout,entry):
     import os
     import sys
     import subprocess
-    from fsl.utils import fslsub
+    import multiprocessing
 
     itr=0;
     nfiles = len(layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'))
-    jid=[]
+    jobs=[];
 
     for dwi in layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'):
         if os.path.exists(entry.wd + '/eddy_dwi_' + str(itr) + '/eddy_unwarped_images.nii.gz'):
+            itr=itr+1
             continue
             print(" ")
 
@@ -332,7 +349,7 @@ def run_eddy_opt1(layout,entry,dependencies):
 
           print('for c in $(seq 1 $imglen); do echo ' + str(inindex) + ' ; done > index.txt')
 
-          print("""eddy --imain=""" + img + """ \
+          print("""eddy_openmp --imain=""" + img + """ \
             --mask=ref_brain_mask \
             --index=index.txt \
             --acqp=""" + acqparams + """ \
@@ -343,15 +360,6 @@ def run_eddy_opt1(layout,entry,dependencies):
             --flm=quadratic \
             --out=eddy_unwarped_images \
             --data_is_shelled""")
-
-          print("""if [[ -f eddy_unwarped_images.nii.gz ]]; 
-              then
-              eddy_quad base \
-                -idx index.txt \
-                -par """ + acqparams + """ \
-                -m ref_brain_mask \
-                -b """+ bval + """;
-              fi;""")
 
           if entry.eddy_QC == True:
             print("""eddy_quad eddy_unwarped_images  \
@@ -369,9 +377,9 @@ def run_eddy_opt1(layout,entry,dependencies):
           print('cp -p ref_brain_mask.nii.gz ' + entry.outputs + '/FDT/' + outmask)
           print('cp -rp eddy_unwarped_images.qc/ ' + entry.outputs + '/FDT/' + outqc)
 
-          print('ln -s ' + bval + ' bvals')
-          print('ln -s ' + bvec + ' bvecs')
-          print('ln -s ' + img  + ' data.nii.gz')
+          print('ln -sf ' + bval + ' bvals')
+          print('ln -sf ' + bvec + ' bvecs')
+          print('ln -sf ' + img  + ' data.nii.gz')
 
           sys.stdout = original_stdout # Reset the standard output to its original value
 
@@ -380,26 +388,27 @@ def run_eddy_opt1(layout,entry,dependencies):
 
         # run script
         cmd = 'bash ' + entry.wd + '/cmd_eddy_dwi_' + str(itr) + '.sh'
-        if dependencies:
-          jid.append(fslsub.submit(cmd, job_name='eddy'+str(itr), wait_for=s.join(dependencies), logdir=entry.wd+'/logs', queue='long.q'))
-        else:
-          jid.append(fslsub.submit(cmd, job_name='eddy'+str(itr), logdir=entry.wd+'/logs', queue='long.q'))
-        if itr == nfiles-1:
-          fslsub.hold(jid[-1])  # wait until job is complete to proceed
+        name = 'eddy' + str(itr)
+        p = multiprocessing.Process(target=worker, args=(name,cmd))
+        jobs.append(p)
+        p.start()
 
         itr = itr+1
+        print(jobs)
+    for job in jobs:
+      job.join()  #wait for all eddy commands to finish
 
-    return jid
+    ## end run_eddy_opt1
 
 # (Option 2) run eddy on concatenated dwi scans (consistent to MRN, HCP pipelines (pairs))
-def run_eddy_opt2(layout,entry,dependencies):
+def run_eddy_opt2(layout,entry):
 
     print('Concatenating dwi images...Running Eddy')
 
     import os
     import sys
     import subprocess
-    from fsl.utils import fslsub
+    import multiprocessing
 
     itr=0; s=', ';
     nfiles = len(layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'))
@@ -433,9 +442,9 @@ def run_eddy_opt2(layout,entry,dependencies):
     for dwi in layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'):
       img = dwi.path
       print(img)
-      cmd += 'ln -s ' + dwi.path + ' dwi_' + str(cc) + '.nii.gz ; \n'
-      cmd += 'ln -s ' + layout.get_bval(dwi.path) + ' bval_' + str(cc) + ' ; \n' 
-      cmd += 'ln -s ' + layout.get_bvec(dwi.path) + ' bvec_' + str(cc) + ' ; \n' 
+      cmd += 'ln -sf ' + dwi.path + ' dwi_' + str(cc) + '.nii.gz ; \n'
+      cmd += 'ln -sf ' + layout.get_bval(dwi.path) + ' bval_' + str(cc) + ' ; \n' 
+      cmd += 'ln -sf ' + layout.get_bvec(dwi.path) + ' bvec_' + str(cc) + ' ; \n' 
 
       topup_img = '../topup/topup_b0'
       acqparams = '../acqparams.txt'
@@ -471,20 +480,22 @@ def run_eddy_opt2(layout,entry,dependencies):
     cmd += 'images=$(ls ref_brain_mask_?.nii.gz); \n '
     cmd += 'nscans=$(ls -1 ref_brain_mask_?.nii.gz | wc -l); \n'
     
+
     # do some fancy bash tricks to get a single line fslmaths command to get average mask
     cmd += 'echo "fslmaths ">tmp ; for i in $images; do echo "$i -add"; done >> tmp ; \n'  # print all individual masks to command
     cmd += "sed -i '$ s/.....$//' tmp; \n"                                                 # remove extra -add tag
     cmd += 'echo "-div $nscans avg_brain_mask" >> tmp; \n'                                 # add rest of command
-    cmd += "cat tmp | tr " + repr('\n') + " ' ' > tmp2; echo ' ' >> tmp2; \n"     
-    cmd += "mv tmp2 tmp ; \n"                           # make command single line
-    cmd += 'chmod a+x tmp; \n'
-    cmd += './tmp;  \n '
+    cmd += "a=`sed ':a;N;$!ba;s/" + "\\" + "n" + "/ /g' tmp`; \n"                          # make command single line
+    cmd += "$a ; \n"                                                                       # run command
+    # cmd += "cat tmp | tr " + repr('\n') + " ' ' > tmp; echo ' ' >> tmp; \n "
+    # cmd += 'chmod a+x tmp; \n'
+    # cmd += './tmp;  \n '
     cmd += 'fslmaths avg_brain_mask -thr 0.5 -bin brain_mask ; \n '
 
     # write bash script for execution
     original_stdout = sys.stdout # Save a reference to the original standard output
     sys.stdout.flush()
-    jid=[]
+    jobs=[];
 
     with open(entry.wd + '/cmd_eddy_concat.sh', 'w') as fid:
       sys.stdout = fid # Change the standard output to the file we created.
@@ -495,7 +506,7 @@ def run_eddy_opt2(layout,entry,dependencies):
       topup_img = '../topup/topup_b0'
       acqparams = '../acqparams.txt'
 
-      print("""eddy --imain=data.nii.gz \
+      print("""eddy_openmp --imain=data.nii.gz \
         --mask=brain_mask \
         --index=index_all.txt \
         --acqp=""" + acqparams + """ \
@@ -507,14 +518,6 @@ def run_eddy_opt2(layout,entry,dependencies):
         --out=eddy_unwarped_images \
         --data_is_shelled""")
 
-      print("""if [[ -f eddy_unwarped_images.nii.gz ]]; 
-          then
-          eddy_quad base \
-            -idx index_all.txt \
-            -par """ + acqparams + """ \
-            -m brain_mask \
-            -b bvals ;
-          fi;""")
       if entry.eddy_QC == True:
         print("""eddy_quad eddy_unwarped_images  \
           -idx index_all.txt \
@@ -538,27 +541,29 @@ def run_eddy_opt2(layout,entry,dependencies):
 
     # run script
     cmd = "bash " + entry.wd + "/cmd_eddy_concat.sh"
-    print(cmd)
-    if dependencies:
-      jid.append(fslsub.submit(cmd, job_name='eddy', wait_for=s.join(dependencies), logdir=entry.wd+'/logs', queue='long.q'))
-    else:
-      jid.append(fslsub.submit(cmd, job_name='eddy', logdir=entry.wd+'/logs', queue='long.q'))
+    name = 'eddy'
+    p = multiprocessing.Process(target=worker, args=(name,cmd))
+    jobs.append(p)
+    p.start()
 
-    fslsub.hold(jid[-1])  # wait until job is complete to proceed    
+    print(jobs)
 
-    return jid
+    for job in jobs:
+      job.join()  #wait for all eddy commands to finish
+
+    ## end run_eddy_opt2
 
 # (Option 2) run tensor fitting on concatenated preprocessed image run with Opt 2
-def run_dtifit_opt2(layout,entry,dependencies):
+def run_dtifit_opt2(layout,entry):
     import os
     import sys
     import subprocess
-    from fsl.utils import fslsub
+    import multiprocessing
 
     # using the distortion corrected dti images, we will compute tensor values
     itr=0; s=', ';
     nfiles = len(layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'))
-    jid=[]
+    jobs=[];
 
     for dwi in layout.get(subject=entry.pid, scope='derivatives', extension='nii.gz', direction='comb', suffix='dwi'):
         if os.path.exists(entry.wd + '/tensor_dwi_' + str(itr) + '/dwi_FA.nii.gz'):
@@ -599,28 +604,29 @@ def run_dtifit_opt2(layout,entry,dependencies):
 
         # run script
         cmd = 'bash ' + entry.wd + '/cmd_tensor_dwi_' + str(itr) + '.sh'
-        if dependencies:
-          jid.append(fslsub.submit(cmd, job_name='dtifit'+str(itr), wait_for=s.join(dependencies), logdir=entry.wd+'/logs', queue='veryshort.q'))
-        else:
-          jid.append(fslsub.submit(cmd, job_name='dtifit'+str(itr), logdir=entry.wd+'/logs', queue='veryshort.q'))
-        if itr == nfiles-1:
-          fslsub.hold(jid[-1])  # wait until job is complete to proceed    
+        name = 'dtifit' + str(itr)
+        p = multiprocessing.Process(target=worker, args=(name,cmd))
+        jobs.append(p)
+        p.start()
 
         itr = itr+1
+        print(jobs)
+    for job in jobs:
+      job.join()  #wait for all eddy commands to finish
 
-    return jid
+    ## end run_dtifit_opt2
 
 # (Option 1) concatenate pre-processed images (opt1) then run tensor fitting 
-def run_dtifit_opt1(layout,entry,dependencies):
+def run_dtifit_opt1(layout,entry):
     import os
     import sys
     import subprocess
-    from fsl.utils import fslsub
+    import multiprocessing
 
     # using the distortion corrected dti images, we will compute tensor values
     itr=0; s=', '
     nfiles = len(layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'))
-    jid=[]
+    jid=[]; jobs=[];
 
     # output filename...
     dwi = layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi')[0]
@@ -659,13 +665,13 @@ def run_dtifit_opt1(layout,entry,dependencies):
       cmd += 'echo "fslmaths ">tmp ; for i in $images; do echo "$i -add"; done >> tmp ; \n'  # print all individual masks to command
       cmd += "sed -i '$ s/.....$//' tmp; \n"                                                 # remove extra -add tag
       cmd += 'echo "-div $nscans avg_brain_mask" >> tmp; \n'                                 # add rest of command
-      cmd += "cat tmp | tr " + repr('\n') + " ' ' > tmp; echo ' ' >> tmp; \n "                                # make command single line
-      cmd += 'chmod a+x tmp; \n'
-      cmd += './tmp;  \n '
+      cmd += "a=`sed ':a;N;$!ba;s/" + "\\" + "n" + "/ /g' tmp`; \n"                           # make command single line
+      cmd += "$a ; \n"                                                                       # run command
+      # cmd += "cat tmp | tr " + repr('\n') + " ' ' > tmp; echo ' ' >> tmp; \n "
+      # cmd += 'chmod a+x tmp; \n'
+      # cmd += './tmp;  \n '
       cmd += 'fslmaths avg_brain_mask -thr 0.5 -bin brain_mask ; \n '
       
-
-
       print("Running dtifit: Joined DWI")
 
       # write bash script for execution
@@ -688,7 +694,7 @@ def run_dtifit_opt1(layout,entry,dependencies):
 
         #move outputs to derivative folder
         spath = outfile.replace("dwi.nii.gz","")
-        print('for i in `ls *.nii.gz`; do ${FSLDIR}/bin/imcp $i ' + entry.outputs + '/' + spath + '$i ; done')
+        print('for i in `ls *.nii.gz`; do ${FSLDIR}/bin/imcp $i ' + entry.outputs + '/FDT/' + spath + '$i ; done')
 
         sys.stdout = original_stdout # Reset the standard output to its original value
 
@@ -697,17 +703,26 @@ def run_dtifit_opt1(layout,entry,dependencies):
 
       # run script
       cmd = 'bash ' + entry.wd + '/cmd_tensor_dwi_join.sh'
-      if dependencies:
-        jid.append(fslsub.submit(cmd, job_name='dtifit', wait_for=s.join(dependencies), logdir=entry.wd+'/logs', queue='veryshort.q'))
-      else:
-        jid.append(fslsub.submit(cmd, job_name='dtifit', logdir=entry.wd+'/logs', queue='veryshort.q'))
-      
-      fslsub.hold(jid[-1])  # wait until job is complete to proceed   
+      name = 'dtifit'
+      p = multiprocessing.Process(target=worker, args=(name,cmd))
+      jobs.append(p)
+      p.start()
 
-    return jid
+      print(jobs)
 
-def run_cleanup(entry,jid):
-    
+      for job in jobs:
+        job.join()  #wait for all eddy commands to finish
+
+    ## end run_dtifit_opt1
+
+def run_cleanup(entry):
+
+    import os
+    import sys
+    import subprocess
+    import multiprocessing
+
+    jobs=[];
     if entry.cleandir == True:
       # write bash script for execution
       original_stdout = sys.stdout # Save a reference to the original standard output
@@ -728,14 +743,17 @@ def run_cleanup(entry,jid):
 
       # run script
       cmd = 'bash ' + entry.wd + '/cmd_cleanup.sh'
-      if dependencies:
-        jid.append(fslsub.submit(cmd, job_name='dti-clean', wait_for=s.join(dependencies), logdir=entry.wd+'/logs', queue='veryshort.q'))
-      else:
-        jid.append(fslsub.submit(cmd, job_name='dti-clean', logdir=entry.wd+'/logs', queue='veryshort.q'))
-      
-      fslsub.hold(jid[-1])  # wait until job is complete to proceed   
+      name = 'cleanup'
+      p = multiprocessing.Process(target=worker, args=(name,cmd))
+      jobs.append(p)
+      p.start()
 
+      print(jobs)
 
+      for job in jobs:
+        job.join()  #wait for all eddy commands to finish
+
+    ## end run_cleanup
 
 
 def main(argv):
@@ -754,35 +772,32 @@ def main(argv):
 
     # get participant bids path:
     bids = bids_data(entry)
-    jid=[]
 
     # pipeline: (1) topup, (2) eddy, (3) dtifit
     if not os.path.exists(entry.wd + '/topup/topup_b0_iout.nii.gz'):
-        jid=run_topup(bids,entry)
-        print(jid)
+        run_topup(bids,entry)
     
     # two run options: 
     if entry.concat == False:
       # (1) distortion and eddy correct each aquisition seperately
-      jid=run_eddy_opt1(bids,entry,jid)
+      run_eddy_opt1(bids,entry)
 
       bids.add_derivatives(entry.outputs + '/FDT')
 
-      jid=run_dtifit_opt1(bids,entry,jid)
+      run_dtifit_opt1(bids,entry)
 
     else:
       # (2) concatenate all aquisitions before preprocessing
-      jid=run_eddy_opt2(bids,entry,jid)
+      run_eddy_opt2(bids,entry)
 
       bids.add_derivatives(entry.outputs + '/FDT')
 
-      jid=run_dtifit_opt2(bids,entry,jid)
+      run_dtifit_opt2(bids,entry)
 
     # clean-up
-    run_cleanup(entry,jid)
+    run_cleanup(entry)
     
 
 if __name__ == "__main__":
     import sys
     main(sys.argv[1:])
-
