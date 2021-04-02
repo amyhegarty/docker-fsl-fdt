@@ -48,10 +48,13 @@ optional arguments:
   --clean-work-dir= {TRUE,FALSE}      flag used to define if working directory should be cleared after execution (DEFAULT: TRUE)
   --concat-preproc= {TRUE,FALSE}      flag used to select if all dwi images should be concatinated before correction (DEFAULT: FALSE)
   --run-qc= {TRUE,FALSE}              flag set to include EDDY_QC (DEFAULT: TRUE)
-  --studyname= ACCOUNT.               account used to submit SLURM job to blanca-ics que (CU-BOULDER only)
 
+** OpenMP used for parellelized execution of eddy. Multiple cores (CPUs) are recommended (4 cpus for each dwi scan).
+       
 Docker entrypoint: FDTPipeline.py
 ```
+> ### Important
+> If running multiple instances of fsl-fdt, you _MUST_ create a unique working directory for each instance to avoid loop contamination.
 
 # Running _fsl-fdt_ using Docker Engine
 This pipeline is built with the intented to be used with docker or singularity engines. Compiled in the docker image includes all python packages and FSL version (6.0.3) for the pipeline.
@@ -91,4 +94,4 @@ $ singularity run
 ```
 
 # Known Issues
-Currently this pipeline is only set to run on CU-Boulder's Blanca ICS partition. Furture releases will offer a more flexible queue command to support other High performace compute environments and local runs.
+Working directory must be explicitly defined (in sperate locations) if running multiple instances of fsl-fdt pipeline on the same computational resources.
