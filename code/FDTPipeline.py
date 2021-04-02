@@ -39,8 +39,8 @@ def print_help():
                                         should be concatenated before pre-processing
           --run-qc=                   (Default: TRUE) boolean to run automated quality 
                                         control for eddy corrected images
-    ** fsl_sub used for job scheduleing. Set all necessary queue variables in system 
-       environment before command execution 
+    ** OpenMP used for parellelized execution of eddy. Multiple cores (CPUs) 
+       are recommended (4 cpus for each dwi scan).
         
         """)
 
@@ -403,8 +403,6 @@ def run_eddy_opt1(layout,entry):
 # (Option 2) run eddy on concatenated dwi scans (consistent to MRN, HCP pipelines (pairs))
 def run_eddy_opt2(layout,entry):
 
-    print('Concatenating dwi images...Running Eddy')
-
     import os
     import sys
     import subprocess
@@ -430,126 +428,129 @@ def run_eddy_opt2(layout,entry):
     outbvec = outfile.replace('nii.gz','bvec')
     outmask = outfile.replace('.nii.gz','_brain-mask.nii.gz')
     outqc   = outfile.replace('.nii.gz','.qc')
-
-    # get links to all input data...
-    imglist=[]; bvallist=[]; bveclsit=[];
-
-    # join bvals and bvecs from all scans
-    cmd = ''
-    cmd += 'mkdir -p ' + entry.wd + '/eddy_dwi_concat ; \n '
-    cmd += 'cd ' + entry.wd + '/eddy_dwi_concat ; \n '
-    cc=0
-    for dwi in layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'):
-      img = dwi.path
-      print(img)
-      cmd += 'ln -sf ' + dwi.path + ' dwi_' + str(cc) + '.nii.gz ; \n'
-      cmd += 'ln -sf ' + layout.get_bval(dwi.path) + ' bval_' + str(cc) + ' ; \n' 
-      cmd += 'ln -sf ' + layout.get_bvec(dwi.path) + ' bvec_' + str(cc) + ' ; \n' 
-
-      topup_img = '../topup/topup_b0'
-      acqparams = '../acqparams.txt'
-
-      if 'AP' in img:
-        inindex=1  # dwi images collected with acqparameters in row 1
-      elif 'PA' in img: 
-        inindex=2  # dwi images collected with acqparameters in row 1
-      else:
-        raise CustomError("Unable to determine if dwi image collected A->P or P->A")
-
-      cmd += 'imglen=`fslval ' + img + ' dim4` ; \n'
-      cmd += 'for c in $(seq 1 $imglen); do echo ' + str(inindex) + ' ; done > index_' + str(cc) + '.txt ; \n'
-         
-      cmd += 'fslroi ' + img + ' b0 0 1 ; \n'
-      cmd += 'applytopup --imain=b0 --topup=' + topup_img + ' --datain=' + acqparams + ' --inindex=' + str(inindex) + ' --method=jac --out=ref ; \n'
-
-      cmd += 'bet ref ref_brain -m -f 0.2 ; \n'
-      cmd += 'mv ref_brain_mask.nii.gz ref_brain_mask_' + str(cc) + '.nii.gz ; \n'
-
-      cc=cc+1
-
-    cmd += 'touch bvecs; touch bvals; touch index_all.txt \n '
-    cmd += 'paste -d " " $(ls bval_?) > bvals; \n '  # use to horizontally concatenate bval files
-    cmd += 'paste -d " " $(ls bvec_?) > bvecs; \n '  # use to horizontally concatenate bvec files
-    cmd += 'for i in $(ls index_?.txt); do cat $i ; done > index_all.txt; \n '
-
-    # merge all raw images...
-    cmd += 'images=$(ls dwi_?.nii.gz); \n '
-    cmd += 'fslmerge -t data $images ; \n '
-
-    # get mask...
-    cmd += 'images=$(ls ref_brain_mask_?.nii.gz); \n '
-    cmd += 'nscans=$(ls -1 ref_brain_mask_?.nii.gz | wc -l); \n'
     
+    print('Concatenating dwi images...Running Eddy')
+    
+    if os.path.exists(entry.wd + '/eddy_dwi_concat' + '/eddy_unwarped_images.nii.gz'):
+      print('Eddy output exists...skipping')
+    else:
 
-    # do some fancy bash tricks to get a single line fslmaths command to get average mask
-    cmd += 'echo "fslmaths ">tmp ; for i in $images; do echo "$i -add"; done >> tmp ; \n'  # print all individual masks to command
-    cmd += "sed -i '$ s/.....$//' tmp; \n"                                                 # remove extra -add tag
-    cmd += 'echo "-div $nscans avg_brain_mask" >> tmp; \n'                                 # add rest of command
-    cmd += "a=`sed ':a;N;$!ba;s/" + "\\" + "n" + "/ /g' tmp`; \n"                          # make command single line
-    cmd += "$a ; \n"                                                                       # run command
-    # cmd += "cat tmp | tr " + repr('\n') + " ' ' > tmp; echo ' ' >> tmp; \n "
-    # cmd += 'chmod a+x tmp; \n'
-    # cmd += './tmp;  \n '
-    cmd += 'fslmaths avg_brain_mask -thr 0.5 -bin brain_mask ; \n '
+      # get links to all input data...
+      imglist=[]; bvallist=[]; bveclsit=[];
 
-    # write bash script for execution
-    original_stdout = sys.stdout # Save a reference to the original standard output
-    sys.stdout.flush()
-    jobs=[];
+      # join bvals and bvecs from all scans
+      cmd = ''
+      cmd += 'mkdir -p ' + entry.wd + '/eddy_dwi_concat ; \n '
+      cmd += 'cd ' + entry.wd + '/eddy_dwi_concat ; \n '
+      cc=0
+      for dwi in layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'):
+        img = dwi.path
+        print(img)
+        cmd += 'ln -sf ' + dwi.path + ' dwi_' + str(cc) + '.nii.gz ; \n'
+        cmd += 'ln -sf ' + layout.get_bval(dwi.path) + ' bval_' + str(cc) + ' ; \n' 
+        cmd += 'ln -sf ' + layout.get_bvec(dwi.path) + ' bvec_' + str(cc) + ' ; \n' 
 
-    with open(entry.wd + '/cmd_eddy_concat.sh', 'w') as fid:
-      sys.stdout = fid # Change the standard output to the file we created.
+        topup_img = '../topup/topup_b0'
+        acqparams = '../acqparams.txt'
 
-      print('#!/usr/bin/bash')
-      print(cmd)
+        if 'AP' in img:
+          inindex=1  # dwi images collected with acqparameters in row 1
+        elif 'PA' in img: 
+          inindex=2  # dwi images collected with acqparameters in row 1
+        else:
+          raise CustomError("Unable to determine if dwi image collected A->P or P->A")
 
-      topup_img = '../topup/topup_b0'
-      acqparams = '../acqparams.txt'
+        cmd += 'imglen=`fslval ' + img + ' dim4` ; \n'
+        cmd += 'for c in $(seq 1 $imglen); do echo ' + str(inindex) + ' ; done > index_' + str(cc) + '.txt ; \n'
 
-      print("""eddy_openmp --imain=data.nii.gz \
-        --mask=brain_mask \
-        --index=index_all.txt \
-        --acqp=""" + acqparams + """ \
-        --bvecs=bvecs \
-        --bvals=bvals \
-        --fwhm=0 \
-        --topup=""" + topup_img + """ \
-        --flm=quadratic \
-        --out=eddy_unwarped_images \
-        --data_is_shelled""")
+        cmd += 'fslroi ' + img + ' b0 0 1 ; \n'
+        cmd += 'applytopup --imain=b0 --topup=' + topup_img + ' --datain=' + acqparams + ' --inindex=' + str(inindex) + ' --method=jac --out=ref ; \n'
 
-      if entry.eddy_QC == True:
-        print("""eddy_quad eddy_unwarped_images  \
-          -idx index_all.txt \
-          -par """ + acqparams + """ \
-          -m brain_mask \
-          -b bvals \
-          -g bvecs \
-          -f """ + topup_img + '_fout')
+        cmd += 'bet ref ref_brain -m -f 0.2 ; \n'
+        cmd += 'mv ref_brain_mask.nii.gz ref_brain_mask_' + str(cc) + '.nii.gz ; \n'
 
-      print('mkdir -p $(dirname "' + entry.outputs + '/FDT/' + outfile + '")' )
-      print('${FSLDIR}/bin/imcp eddy_unwarped_images.nii.gz ' + entry.outputs + '/FDT/' + outfile)
-      print('cp -p bvals ' + entry.outputs + '/FDT/' + outbval)
-      print('cp -p bvecs ' + entry.outputs + '/FDT/' + outbvec)
-      print('cp -p brain_mask.nii.gz ' + entry.outputs + '/FDT/' + outmask)
-      print('cp -rp eddy_unwarped_images.qc/ ' + entry.outputs + '/FDT/' + outqc)
+        cc=cc+1
 
-      sys.stdout = original_stdout # Reset the standard output to its original value
+      cmd += 'touch bvecs; touch bvals; touch index_all.txt \n '
+      cmd += 'paste -d " " $(ls bval_?) > bvals; \n '  # use to horizontally concatenate bval files
+      cmd += 'paste -d " " $(ls bvec_?) > bvecs; \n '  # use to horizontally concatenate bvec files
+      cmd += 'for i in $(ls index_?.txt); do cat $i ; done > index_all.txt; \n '
 
-    # change permissions to make sure file is executable 
-    os.chmod(entry.wd + '/cmd_eddy_concat.sh', 0o774)
+      # merge all raw images...
+      cmd += 'images=$(ls dwi_?.nii.gz); \n '
+      cmd += 'fslmerge -t data $images ; \n '
 
-    # run script
-    cmd = "bash " + entry.wd + "/cmd_eddy_concat.sh"
-    name = 'eddy'
-    p = multiprocessing.Process(target=worker, args=(name,cmd))
-    jobs.append(p)
-    p.start()
+      # get mask...
+      cmd += 'images=$(ls ref_brain_mask_?.nii.gz); \n '
+      cmd += 'nscans=$(ls -1 ref_brain_mask_?.nii.gz | wc -l); \n'
 
-    print(jobs)
 
-    for job in jobs:
-      job.join()  #wait for all eddy commands to finish
+      # do some fancy bash tricks to get a single line fslmaths command to get average mask
+      cmd += 'echo "fslmaths ">tmp ; for i in $images; do echo "$i -add"; done >> tmp ; \n'  # print all individual masks to command
+      cmd += "sed -i '$ s/.....$//' tmp; \n"                                                 # remove extra -add tag
+      cmd += 'echo "-div $nscans avg_brain_mask" >> tmp; \n'                                 # add rest of command
+      cmd += "a=`sed ':a;N;$!ba;s/" + "\\" + "n" + "/ /g' tmp`; \n"                          # make command single line
+      cmd += "$a ; \n"                                                                       # run command
+      cmd += 'fslmaths avg_brain_mask -thr 0.5 -bin brain_mask ; \n '
+
+      # write bash script for execution
+      original_stdout = sys.stdout # Save a reference to the original standard output
+      sys.stdout.flush()
+      jobs=[];
+
+      with open(entry.wd + '/cmd_eddy_concat.sh', 'w') as fid:
+        sys.stdout = fid # Change the standard output to the file we created.
+
+        print('#!/usr/bin/bash')
+        print(cmd)
+
+        topup_img = '../topup/topup_b0'
+        acqparams = '../acqparams.txt'
+
+        print("""eddy_openmp --imain=data.nii.gz \
+          --mask=brain_mask \
+          --index=index_all.txt \
+          --acqp=""" + acqparams + """ \
+          --bvecs=bvecs \
+          --bvals=bvals \
+          --fwhm=0 \
+          --topup=""" + topup_img + """ \
+          --flm=quadratic \
+          --out=eddy_unwarped_images \
+          --data_is_shelled""")
+
+        if entry.eddy_QC == True:
+          print("""eddy_quad eddy_unwarped_images  \
+            -idx index_all.txt \
+            -par """ + acqparams + """ \
+            -m brain_mask \
+            -b bvals \
+            -g bvecs \
+            -f """ + topup_img + '_fout')
+
+        print('mkdir -p $(dirname "' + entry.outputs + '/FDT/' + outfile + '")' )
+        print('${FSLDIR}/bin/imcp eddy_unwarped_images.nii.gz ' + entry.outputs + '/FDT/' + outfile)
+        print('cp -p bvals ' + entry.outputs + '/FDT/' + outbval)
+        print('cp -p bvecs ' + entry.outputs + '/FDT/' + outbvec)
+        print('cp -p brain_mask.nii.gz ' + entry.outputs + '/FDT/' + outmask)
+        print('cp -rp eddy_unwarped_images.qc/ ' + entry.outputs + '/FDT/' + outqc)
+
+        sys.stdout = original_stdout # Reset the standard output to its original value
+
+      # change permissions to make sure file is executable 
+      os.chmod(entry.wd + '/cmd_eddy_concat.sh', 0o774)
+
+      # run script
+      cmd = "bash " + entry.wd + "/cmd_eddy_concat.sh"
+      name = 'eddy'
+      p = multiprocessing.Process(target=worker, args=(name,cmd))
+      jobs.append(p)
+      p.start()
+
+      print(jobs)
+
+      for job in jobs:
+        job.join()  #wait for all eddy commands to finish
 
     ## end run_eddy_opt2
 
@@ -665,11 +666,8 @@ def run_dtifit_opt1(layout,entry):
       cmd += 'echo "fslmaths ">tmp ; for i in $images; do echo "$i -add"; done >> tmp ; \n'  # print all individual masks to command
       cmd += "sed -i '$ s/.....$//' tmp; \n"                                                 # remove extra -add tag
       cmd += 'echo "-div $nscans avg_brain_mask" >> tmp; \n'                                 # add rest of command
-      cmd += "a=`sed ':a;N;$!ba;s/" + "\\" + "n" + "/ /g' tmp`; \n"                           # make command single line
+      cmd += "a=`sed ':a;N;$!ba;s/" + "\\" + "n" + "/ /g' tmp`; \n"                          # make command single line
       cmd += "$a ; \n"                                                                       # run command
-      # cmd += "cat tmp | tr " + repr('\n') + " ' ' > tmp; echo ' ' >> tmp; \n "
-      # cmd += 'chmod a+x tmp; \n'
-      # cmd += './tmp;  \n '
       cmd += 'fslmaths avg_brain_mask -thr 0.5 -bin brain_mask ; \n '
       
       print("Running dtifit: Joined DWI")
