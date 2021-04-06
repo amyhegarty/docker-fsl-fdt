@@ -39,8 +39,15 @@ def print_help():
                                         should be concatenated before pre-processing
           --run-qc=                   (Default: TRUE) boolean to run automated quality 
                                         control for eddy corrected images
+          --run-tensor-fit            add flag to run tensor-fit processing on 
+                                        preprocessed images
+          --run-bedpostx              add flag to run bedpostx tractography processing on 
+                                        preprocessed images (default settings used for analysis)
     ** OpenMP used for parellelized execution of eddy. Multiple cores (CPUs) 
        are recommended (4 cpus for each dwi scan).
+       
+    ** see github repository for more information and to report issues: 
+       https://github.com/amyhegarty/docker-fsl-fdt.git
         
         """)
 
@@ -63,10 +70,12 @@ def parse_arguments(argv):
     cat = False
     qc = True
     cleandir = False
+    runfit = False
+    runbedpostx = False
 
 
     try:
-      opts, args = getopt.getopt(argv,"hi:o:",["in=","out=","help","participant-label=","work-dir=","clean-work-dir=","concat-preproc=","run-qc=","studyname="])
+      opts, args = getopt.getopt(argv,"hi:o:",["in=","out=","help","participant-label=","work-dir=","clean-work-dir=","concat-preproc=","run-qc=","run-tensor-fit","run-bedpostx])
     except getopt.GetoptError:
       print_help()
       sys.exit(2)
@@ -102,8 +111,10 @@ def parse_arguments(argv):
             qc = False
          else:
             raise Exception("Error: --run-qc= [TRUE / FALSE]")
-      elif opt in ("--studyname"):
-        studyname = arg
+      elif opt in ("--run-tensor-fit"):
+        runfit = True
+      elif opt in ("--run-bedpostx"):
+        runbedpostx = True                                         
     if 'inputs' not in locals():
       print_help()
       raise Exception("Missing required argument --in=")
@@ -122,7 +133,7 @@ def parse_arguments(argv):
     print('Participant:\t\t', str(pid))
 
     class args:
-      def __init__(self, que, studyname, wd, inputs, outputs, pid, cat, qc, cleandir):
+      def __init__(self, que, studyname, wd, inputs, outputs, pid, cat, qc, cleandir,runfit,runbedpostx):
         self.que = que
         self.studyname = studyname
         self.wd = wd
@@ -132,6 +143,8 @@ def parse_arguments(argv):
         self.concat= cat
         self.eddy_QC=qc
         self.cleandir=cleandir
+        self.rundtifit=runfit
+        self.runbedpostx=runbedpostx
 
     entry = args(que, studyname, wd, inputs, outputs, pid, cat, qc, cleandir)
 
@@ -554,69 +567,6 @@ def run_eddy_opt2(layout,entry):
 
     ## end run_eddy_opt2
 
-# (Option 2) run tensor fitting on concatenated preprocessed image run with Opt 2
-def run_dtifit_opt2(layout,entry):
-    import os
-    import sys
-    import subprocess
-    import multiprocessing
-
-    # using the distortion corrected dti images, we will compute tensor values
-    itr=0; s=', ';
-    nfiles = len(layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'))
-    jobs=[];
-
-    for dwi in layout.get(subject=entry.pid, scope='derivatives', extension='nii.gz', direction='comb', suffix='dwi'):
-        if os.path.exists(entry.wd + '/tensor_dwi_' + str(itr) + '/dwi_FA.nii.gz'):
-          continue
-
-        preproc_img = dwi.path
-        bval = layout.get_bval(dwi.path)
-        bvec = layout.get_bvec(dwi.path)
-        mask = preproc_img.replace('.nii.gz','_brain-mask.nii.gz')
-
-        print("Running dtifit: " + preproc_img)
-
-        # write bash script for execution
-        original_stdout = sys.stdout # Save a reference to the original standard output
-        sys.stdout.flush()
-
-        with open(entry.wd + '/cmd_tensor_dwi_' + str(itr) + '.sh', 'w') as fid:
-          sys.stdout = fid # Change the standard output to the file we created.
-
-          print('#!/usr/bin/bash')
-          print('mkdir -p ' + entry.wd + '/tensor_dwi_' + str(itr))
-          print('cd ' + entry.wd + '/tensor_dwi_' + str(itr))
-          # add commands here...
-          print("""dtifit --data=""" + preproc_img + """ \
-            --mask=""" + mask + """ \
-            --bvecs=""" + bvec + """ \
-            --bvals="""+ bval + """ \
-            --out=dwi """)
-
-          #move outputs to derivative folder
-          spath = preproc_img.replace("dwi.nii.gz","")
-          print('for i in *.nii.gz; do ${FSLDIR}/bin/imcp $i ' + spath + '$i ; done')
-
-          sys.stdout = original_stdout # Reset the standard output to its original value
-
-        # change permissions to make sure file is executable 
-        os.chmod(entry.wd + '/cmd_tensor_dwi_' + str(itr) + '.sh', 0o774)
-
-        # run script
-        cmd = 'bash ' + entry.wd + '/cmd_tensor_dwi_' + str(itr) + '.sh'
-        name = 'dtifit' + str(itr)
-        p = multiprocessing.Process(target=worker, args=(name,cmd))
-        jobs.append(p)
-        p.start()
-
-        itr = itr+1
-        print(jobs)
-    for job in jobs:
-      job.join()  #wait for all eddy commands to finish
-
-    ## end run_dtifit_opt2
-
 # (Option 1) concatenate pre-processed images (opt1) then run tensor fitting 
 def run_dtifit_opt1(layout,entry):
     import os
@@ -712,7 +662,226 @@ def run_dtifit_opt1(layout,entry):
         job.join()  #wait for all eddy commands to finish
 
     ## end run_dtifit_opt1
+                                               
+# (Option 2) run tensor fitting on concatenated preprocessed image run with Opt 2
+def run_dtifit_opt2(layout,entry):
+    import os
+    import sys
+    import subprocess
+    import multiprocessing
 
+    # using the distortion corrected dti images, we will compute tensor values
+    itr=0; s=', ';
+    nfiles = len(layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'))
+    jobs=[];
+
+    for dwi in layout.get(subject=entry.pid, scope='derivatives', extension='nii.gz', direction='comb', suffix='dwi'):
+        if os.path.exists(entry.wd + '/tensor_dwi_' + str(itr) + '/dwi_FA.nii.gz'):
+          continue
+
+        preproc_img = dwi.path
+        bval = layout.get_bval(dwi.path)
+        bvec = layout.get_bvec(dwi.path)
+        mask = preproc_img.replace('.nii.gz','_brain-mask.nii.gz')
+
+        print("Running dtifit: " + preproc_img)
+
+        # write bash script for execution
+        original_stdout = sys.stdout # Save a reference to the original standard output
+        sys.stdout.flush()
+
+        with open(entry.wd + '/cmd_tensor_dwi_' + str(itr) + '.sh', 'w') as fid:
+          sys.stdout = fid # Change the standard output to the file we created.
+
+          print('#!/usr/bin/bash')
+          print('mkdir -p ' + entry.wd + '/tensor_dwi_' + str(itr))
+          print('cd ' + entry.wd + '/tensor_dwi_' + str(itr))
+          # add commands here...
+          print("""dtifit --data=""" + preproc_img + """ \
+            --mask=""" + mask + """ \
+            --bvecs=""" + bvec + """ \
+            --bvals="""+ bval + """ \
+            --out=dwi """)
+
+          #move outputs to derivative folder
+          spath = preproc_img.replace("dwi.nii.gz","")
+          print('for i in *.nii.gz; do ${FSLDIR}/bin/imcp $i ' + spath + '$i ; done')
+
+          sys.stdout = original_stdout # Reset the standard output to its original value
+
+        # change permissions to make sure file is executable 
+        os.chmod(entry.wd + '/cmd_tensor_dwi_' + str(itr) + '.sh', 0o774)
+
+        # run script
+        cmd = 'bash ' + entry.wd + '/cmd_tensor_dwi_' + str(itr) + '.sh'
+        name = 'dtifit' + str(itr)
+        p = multiprocessing.Process(target=worker, args=(name,cmd))
+        jobs.append(p)
+        p.start()
+
+        itr = itr+1
+        print(jobs)
+    for job in jobs:
+      job.join()  #wait for all eddy commands to finish
+
+    ## end run_dtifit_opt2
+                                               
+# (Option 1) concatenate pre-processed images (opt1) then run tractography (bedpostx) 
+def run_bedpostx_opt1(layout,entry):
+    import os
+    import sys
+    import subprocess
+    import multiprocessing
+
+    # using the distortion corrected dti images, we will compute tensor values
+    itr=0; s=', '
+    nfiles = len(layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'))
+    jid=[]; jobs=[];
+
+    # output filename...
+    dwi = layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi')[0]
+    ent = layout.parse_file_entities(dwi.path)
+
+    # Define the pattern to build out of the components passed in the dictionary
+    pattern = "sub-{subject}/[ses-{session}/]sub-{subject}[_ses-{session}][_task-{task}][_acq-{acquisition}][_rec-{reconstruction}][_run-{run}][_echo-{echo}][_space-{space}][_desc-{desc}]_{suffix}.nii.gz",
+
+    # Add additional info to output file entities
+    ent['space'] = 'native'
+    ent['desc'] = 'preproc'
+
+    outfile = layout.build_path(ent, pattern, validate=False, absolute_paths=False)
+
+    if not os.path.exists(entry.wd + '/bedpostx_dwi.bedpostX'):
+
+      # join all eddy corrected images before calculating tractography...
+      
+      cmd = ''
+      cmd += 'mkdir -p ' + entry.wd + '/bedpostx_dwi ; \n '
+      cmd += 'cd ' + entry.wd + '/bedpostx_dwi ; \n '
+      cmd += 'paste -d " " $(ls ../eddy_dwi_?/bvals) > bvals; \n '  # use to horizontally concatenate bval files
+      cmd += 'paste -d " " $(ls ../eddy_dwi_?/bvecs) > bvecs; \n '  # use to horizontally concatenate bvec files
+
+      # merge all raw images...
+      cmd += 'images=$(ls ../eddy_dwi_?/eddy_unwarped_images.nii.gz); \n '
+      cmd += 'fslmerge -t data $images ; \n '
+
+      # get average mask
+      cmd += 'images=$(ls ../eddy_dwi_?/ref_brain_mask.nii.gz); \n '
+      cmd += 'nscans=$(ls -1 ../eddy_dwi_?/ref_brain_mask.nii.gz | wc -l); \n'
+      
+      # do some fancy bash tricks to get a single line fslmaths command to get average mask
+      cmd += 'echo "fslmaths ">tmp ; for i in $images; do echo "$i -add"; done >> tmp ; \n'  # print all individual masks to command
+      cmd += "sed -i '$ s/.....$//' tmp; \n"                                                 # remove extra -add tag
+      cmd += 'echo "-div $nscans avg_brain_mask" >> tmp; \n'                                 # add rest of command
+      cmd += "a=`sed ':a;N;$!ba;s/" + "\\" + "n" + "/ /g' tmp`; \n"                          # make command single line
+      cmd += "$a ; \n"                                                                       # run command
+      cmd += 'fslmaths avg_brain_mask -thr 0.5 -bin brain_mask ; \n '
+      cmd += 'rm avg_brain_mask ; \n '                                         
+      
+      print("Running bedpostx: Joined DWI")
+
+      # write bash script for execution
+      original_stdout = sys.stdout # Save a reference to the original standard output
+      sys.stdout.flush()
+
+      with open(entry.wd + '/cmd_bedpost_dwi.sh', 'w') as fid:
+        sys.stdout = fid # Change the standard output to the file we created.
+
+        print('#!/usr/bin/bash')
+        
+        # add commands here...
+        print(cmd)
+                                               
+        print("cd ..")                                       
+
+        print("bedpostx bedpostx_dwi")
+
+        #move outputs to derivative folder
+        spath = outfile.replace("dwi.nii.gz","")
+        print('mv bedpostx_dwi.bedpostX ' + entry.outputs + '/FDT/' + spath + '.bedpostX' )
+
+        sys.stdout = original_stdout # Reset the standard output to its original value
+
+      # change permissions to make sure file is executable 
+      os.chmod(entry.wd + '/cmd_bedpost_dwi.sh', 0o774)
+
+      # run script
+      cmd = 'bash ' + entry.wd + '/cmd_bedpost_dwi.sh'
+      name = 'bedpostx'
+      p = multiprocessing.Process(target=worker, args=(name,cmd))
+      jobs.append(p)
+      p.start()
+
+      print(jobs)
+
+      for job in jobs:
+        job.join()  #wait for all eddy commands to finish
+
+    ## end run_bedpostx_opt1
+                                               
+# (Option 2) run tractography on concatenated preprocessed image run with Opt 2
+def run_bedpostx_opt2(layout,entry):
+    import os
+    import sys
+    import subprocess
+    import multiprocessing
+
+    # using the distortion corrected dti images, we will compute tractograpy
+    itr=0; s=', ';
+    nfiles = len(layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'))
+    jobs=[];
+                                               
+    dwi=layout.get(subject=entry.pid, scope='derivatives', extension='nii.gz', direction='comb', suffix='dwi');
+    
+    if not os.path.exists(entry.wd + '/bedpostx_dwi.bedpostX'):                                        
+        preproc_img = dwi.path
+        bval = layout.get_bval(dwi.path)
+        bvec = layout.get_bvec(dwi.path)
+        mask = preproc_img.replace('.nii.gz','_brain-mask.nii.gz')
+
+        print("Running bedpostx: " + preproc_img)
+
+        # write bash script for execution
+        original_stdout = sys.stdout # Save a reference to the original standard output
+        sys.stdout.flush()
+
+        with open(entry.wd + '/cmd_bedpost_dwi.sh', 'w') as fid:
+          sys.stdout = fid # Change the standard output to the file we created.
+
+          print('#!/usr/bin/bash')
+          print('mkdir -p ' + entry.wd + '/bedpostx_dwi')
+          print('cd ' + entry.wd)
+          print('imcp ' + preproc_img + ' bedpostx_dwi/data.nii.gz')
+          print('imcp ' + mask + ' bedpostx_dwi/nodif_brain_mask.nii.gz')    
+          print('cp ' + bval + ' bedpostx_dwi/bvals')                                      
+          print('cp ' + bvec + ' bedpostx_dwi/bvecs')   
+          
+          # add commands here...
+                                               
+          print("bedpostx bedpostx_dwi")
+
+          #move outputs to derivative folder
+          spath = preproc_img.replace("dwi.nii.gz","")
+          print('mv bedpostx_dwi.bedpostX ' + entry.outputs + '/FDT/' + spath + '.bedpostX' )
+
+          sys.stdout = original_stdout # Reset the standard output to its original value
+
+        # change permissions to make sure file is executable 
+        os.chmod(entry.wd + '/cmd_bedpost_dwi.sh', 0o774)
+
+        # run script
+        cmd = 'bash ' + entry.wd + '/cmd_bedpost_dwi.sh'
+        name = 'dtifit' + str(itr)
+        p = multiprocessing.Process(target=worker, args=(name,cmd))
+        jobs.append(p)
+        p.start()
+
+        print(p)
+    for job in jobs:
+      job.join()  #wait for all eddy commands to finish
+
+    ## end run_bedpostx_opt2
+                                               
 def run_cleanup(entry):
 
     import os
@@ -781,8 +950,12 @@ def main(argv):
       run_eddy_opt1(bids,entry)
 
       bids.add_derivatives(entry.outputs + '/FDT')
-
-      run_dtifit_opt1(bids,entry)
+      
+      if entry.rundtifit == True:
+        run_dtifit_opt1(bids,entry)
+      
+      if entry.runbedpostx == True:
+        run_bedpostx_opt1(bids,entry)
 
     else:
       # (2) concatenate all aquisitions before preprocessing
@@ -790,7 +963,11 @@ def main(argv):
 
       bids.add_derivatives(entry.outputs + '/FDT')
 
-      run_dtifit_opt2(bids,entry)
+      if entry.rundtifit == True:
+        run_dtifit_opt2(bids,entry)
+      
+      if entry.runbedpostx == True:
+        run_bedpostx_opt2(bids,entry)
 
     # clean-up
     run_cleanup(entry)
