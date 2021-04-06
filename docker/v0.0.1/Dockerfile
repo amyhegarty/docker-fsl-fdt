@@ -138,9 +138,9 @@ RUN rm -vfR /var/lib/apt/lists/* \
     && cd /ent \
     && git clone https://github.com/amyhegarty/docker-fsl-fdt.git
 
-# replace fsl_sub from basic install with custom command
-RUN mv /ent/docker-fsl-fdt/code/fslutils/fsl6.0.3/fsl_sub /opt/fsl-6.0.3/bin/fsl_sub \
-    && chmod a+rwx /opt/fsl-6.0.3/bin/fsl_sub
+## replace fsl_sub from basic install with custom command
+# RUN mv /ent/docker-fsl-fdt/code/fslutils/fsl6.0.3/fsl_sub /opt/fsl-6.0.3/bin/fsl_sub \
+#     && chmod a+rwx /opt/fsl-6.0.3/bin/fsl_sub
 
 RUN echo '{ \
     \n  "pkg_manager": "apt", \
