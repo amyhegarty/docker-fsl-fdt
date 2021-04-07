@@ -48,9 +48,11 @@ optional arguments:
   --clean-work-dir= {TRUE,FALSE}      flag used to define if working directory should be cleared after execution (DEFAULT: TRUE)
   --concat-preproc= {TRUE,FALSE}      flag used to select if all dwi images should be concatinated before correction (DEFAULT: FALSE)
   --run-qc= {TRUE,FALSE}              flag set to include EDDY_QC (DEFAULT: TRUE)
-
+  --run-tensor-fit                    add flag to run tensor-fit processing on preprocessed images
+  --run-bedpostx                      add flag to run bedpostx tractography processing on preprocessed images (default settings used for analysis)
+  
 ** OpenMP used for parellelized execution of eddy. Multiple cores (CPUs) are recommended (4 cpus for each dwi scan).
-       
+
 Docker entrypoint: FDTPipeline.py
 ```
 > ### Important
