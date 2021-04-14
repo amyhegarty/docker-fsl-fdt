@@ -75,7 +75,7 @@ def parse_arguments(argv):
 
 
     try:
-      opts, args = getopt.getopt(argv,"hi:o:",["in=","out=","help","participant-label=","work-dir=","clean-work-dir=","concat-preproc=","run-qc=","run-tensor-fit","run-bedpostx])
+      opts, args = getopt.getopt(argv,"hi:o:",["in=","out=","help","participant-label=","work-dir=","clean-work-dir=","concat-preproc=","run-qc=","run-tensor-fit","run-bedpostx"])
     except getopt.GetoptError:
       print_help()
       sys.exit(2)
@@ -133,7 +133,7 @@ def parse_arguments(argv):
     print('Participant:\t\t', str(pid))
 
     class args:
-      def __init__(self, que, studyname, wd, inputs, outputs, pid, cat, qc, cleandir,runfit,runbedpostx):
+      def __init__(self, que, studyname, wd, inputs, outputs, pid, cat, qc, cleandir, runfit, runbedpostx):
         self.que = que
         self.studyname = studyname
         self.wd = wd
@@ -146,7 +146,7 @@ def parse_arguments(argv):
         self.rundtifit=runfit
         self.runbedpostx=runbedpostx
 
-    entry = args(que, studyname, wd, inputs, outputs, pid, cat, qc, cleandir)
+    entry = args(que, studyname, wd, inputs, outputs, pid, cat, qc, cleandir, runfit, runbedpostx)
 
     return entry
 
@@ -505,6 +505,7 @@ def run_eddy_opt2(layout,entry):
       cmd += "a=`sed ':a;N;$!ba;s/" + "\\" + "n" + "/ /g' tmp`; \n"                          # make command single line
       cmd += "$a ; \n"                                                                       # run command
       cmd += 'fslmaths avg_brain_mask -thr 0.5 -bin brain_mask ; \n '
+      cmd += 'rm avg_brain_mask.nii.gz ; \n'
 
       # write bash script for execution
       original_stdout = sys.stdout # Save a reference to the original standard output
@@ -619,6 +620,7 @@ def run_dtifit_opt1(layout,entry):
       cmd += "a=`sed ':a;N;$!ba;s/" + "\\" + "n" + "/ /g' tmp`; \n"                          # make command single line
       cmd += "$a ; \n"                                                                       # run command
       cmd += 'fslmaths avg_brain_mask -thr 0.5 -bin brain_mask ; \n '
+      cmd += 'rm avg_brain_mask.nii.gz ; \n'
       
       print("Running dtifit: Joined DWI")
 
@@ -750,8 +752,9 @@ def run_bedpostx_opt1(layout,entry):
     ent['desc'] = 'preproc'
 
     outfile = layout.build_path(ent, pattern, validate=False, absolute_paths=False)
+    spath = outfile.replace("dwi.nii.gz","")
 
-    if not os.path.exists(entry.wd + '/bedpostx_dwi.bedpostX'):
+    if not os.path.exists(entry.outputs + '/FDT/' + spath + 'dwi.bedpostX'):
 
       # join all eddy corrected images before calculating tractography...
       
