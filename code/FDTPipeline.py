@@ -65,7 +65,6 @@ def parse_arguments(argv):
     #intialize arguements
     print("\nParsing User Inputs...")
     que = "ics"
-    studyname = ""
     wd = "/working"
     cat = False
     qc = True
@@ -289,19 +288,9 @@ def run_eddy_opt1(layout,entry):
     jobs=[];
 
     for dwi in layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'):
-        if os.path.exists(entry.wd + '/eddy_dwi_' + str(itr) + '/eddy_unwarped_images.nii.gz'):
-            itr=itr+1
-            continue
-            print(" ")
-
+        
         img = dwi.path
-        bval = layout.get_bval(dwi.path)
-        bvec = layout.get_bvec(dwi.path)
-        s=', '
-        print('Using: ' + img)
-        print('Using: ' + bval)
-        print('Using: ' + bvec)
-
+        
         # output filename...
         ent = layout.parse_file_entities(img)
 
@@ -317,6 +306,18 @@ def run_eddy_opt1(layout,entry):
         outbvec = outfile.replace('nii.gz','bvec')
         outmask = outfile.replace('.nii.gz','_brain-mask.nii.gz')
         outqc   = outfile.replace('.nii.gz','.qc')
+        
+        if os.path.exists(entry.outputs + '/FDT/' + outfile):
+            itr=itr+1
+            continue
+            print(" ")
+
+        bval = layout.get_bval(dwi.path)
+        bvec = layout.get_bvec(dwi.path)
+        s=', '
+        print('Using: ' + img)
+        print('Using: ' + bval)
+        print('Using: ' + bvec)
 
         print("corrected image: " + outfile)
 
@@ -407,7 +408,7 @@ def run_eddy_opt1(layout,entry):
         p.start()
 
         itr = itr+1
-        print(jobs)
+        print(p)
     for job in jobs:
       job.join()  #wait for all eddy commands to finish
 
@@ -444,7 +445,7 @@ def run_eddy_opt2(layout,entry):
     
     print('Concatenating dwi images...Running Eddy')
     
-    if os.path.exists(entry.wd + '/eddy_dwi_concat' + '/eddy_unwarped_images.nii.gz'):
+    if os.path.exists(entry.outputs + '/FDT/' + outfile):
       print('Eddy output exists...skipping')
     else:
 
@@ -561,7 +562,7 @@ def run_eddy_opt2(layout,entry):
       jobs.append(p)
       p.start()
 
-      print(jobs)
+      print(p)
 
       for job in jobs:
         job.join()  #wait for all eddy commands to finish
@@ -592,8 +593,9 @@ def run_dtifit_opt1(layout,entry):
     ent['desc'] = 'preproc'
 
     outfile = layout.build_path(ent, pattern, validate=False, absolute_paths=False)
+    FAfile = outfile.replace("dwi.nii.gz","dwi_FA.nii.gz")
 
-    if not os.path.exists(entry.wd + '/tensor_dwi_join' + '/dwi_FA.nii.gz'):
+    if not os.path.exists(entry.outputs + '/FDT/' + FAfile):
 
       # join all eddy corrected images before calculating tensors...
       
@@ -658,7 +660,7 @@ def run_dtifit_opt1(layout,entry):
       jobs.append(p)
       p.start()
 
-      print(jobs)
+      print(p)
 
       for job in jobs:
         job.join()  #wait for all eddy commands to finish
@@ -677,8 +679,12 @@ def run_dtifit_opt2(layout,entry):
     nfiles = len(layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'))
     jobs=[];
 
-    for dwi in layout.get(subject=entry.pid, scope='derivatives', extension='nii.gz', direction='comb', suffix='dwi'):
-        if os.path.exists(entry.wd + '/tensor_dwi_' + str(itr) + '/dwi_FA.nii.gz'):
+    for dwi in layout.get(subject=entry.pid, scope='derivatives', extension='nii.gz', suffix='dwi'):
+      
+        preproc_img = dwi.path
+        FAfile = preproc_img.replace("dwi.nii.gz","dwi_FA.nii.gz")
+      
+        if os.path.exists(entry.outputs + '/FDT/' + FAfile):
           continue
 
         preproc_img = dwi.path
@@ -722,7 +728,7 @@ def run_dtifit_opt2(layout,entry):
         p.start()
 
         itr = itr+1
-        print(jobs)
+        print(p)
     for job in jobs:
       job.join()  #wait for all eddy commands to finish
 
@@ -815,7 +821,7 @@ def run_bedpostx_opt1(layout,entry):
       jobs.append(p)
       p.start()
 
-      print(jobs)
+      print(p)
 
       for job in jobs:
         job.join()  #wait for all eddy commands to finish
@@ -834,10 +840,11 @@ def run_bedpostx_opt2(layout,entry):
     nfiles = len(layout.get(subject=entry.pid, extension='nii.gz', suffix='dwi'))
     jobs=[];
                                                
-    dwi=layout.get(subject=entry.pid, scope='derivatives', extension='nii.gz', direction='comb', suffix='dwi');
+    dwi=layout.get(subject=entry.pid, scope='derivatives', extension='nii.gz', suffix='dwi');
+    preproc_img = dwi.path
+    spath = preproc_img.replace("dwi.nii.gz","")
     
-    if not os.path.exists(entry.wd + '/bedpostx_dwi.bedpostX'):                                        
-        preproc_img = dwi.path
+    if not os.path.exists(entry.outputs + '/FDT/' + spath + '.bedpostX'):                                        
         bval = layout.get_bval(dwi.path)
         bvec = layout.get_bvec(dwi.path)
         mask = preproc_img.replace('.nii.gz','_brain-mask.nii.gz')
@@ -918,7 +925,7 @@ def run_cleanup(entry):
       jobs.append(p)
       p.start()
 
-      print(jobs)
+      print(p)
 
       for job in jobs:
         job.join()  #wait for all eddy commands to finish
