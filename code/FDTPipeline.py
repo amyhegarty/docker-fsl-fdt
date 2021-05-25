@@ -132,9 +132,8 @@ def parse_arguments(argv):
     print('Participant:\t\t', str(pid))
 
     class args:
-      def __init__(self, que, studyname, wd, inputs, outputs, pid, cat, qc, cleandir, runfit, runbedpostx):
+      def __init__(self, que, wd, inputs, outputs, pid, cat, qc, cleandir, runfit, runbedpostx):
         self.que = que
-        self.studyname = studyname
         self.wd = wd
         self.inputs = inputs
         self.outputs = outputs
@@ -145,7 +144,7 @@ def parse_arguments(argv):
         self.rundtifit=runfit
         self.runbedpostx=runbedpostx
 
-    entry = args(que, studyname, wd, inputs, outputs, pid, cat, qc, cleandir, runfit, runbedpostx)
+    entry = args(que, wd, inputs, outputs, pid, cat, qc, cleandir, runfit, runbedpostx)
 
     return entry
 
