@@ -308,6 +308,7 @@ def run_eddy_opt1(layout,entry):
         
         if os.path.exists(entry.outputs + '/FDT/' + outfile):
             itr=itr+1
+            print("Eddy output exists...skipping: " + outfile)
             continue
             print(" ")
 
